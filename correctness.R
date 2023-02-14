@@ -6,7 +6,8 @@ library(dplyr)
 algorithms <- c("gp", "ls")
 
 # Programs used in the experiment
-programs <- c("commons-codec",
+programs <- c(
+              "commons-codec",
               "commons-compress",
               "commons-csv",
               "commons-fileupload",
@@ -16,11 +17,9 @@ programs <- c("commons-codec",
               "gson",
               "jcodec",
               "jfreechart",
-              "jgrapht",
-              # "joda-time",
-              "spatial4j")
-
-# Strategies used in the experiment
+              # "jgrapht",
+              "spatial4j"
+              )
 strategies <- c("ekstazi", "starts", "random")
 
 # Declare the treatment function
@@ -49,6 +48,10 @@ treatmentFunction <- function(algorithm, runs){
             FitnessImprovement = col_double(),
             TimeStamp = col_double()
           ))
+        
+        if(nrow(csvResults) == 0){
+          print(paste(paste(algorithm, program, strategy, run, "result", sep = "_"), "is empty!!!", sep=" "))
+        }
         
         # Gets only the ones that passed
         csvResults <- csvResults %>%
@@ -83,6 +86,10 @@ treatmentFunction <- function(algorithm, runs){
             NPassed = col_double(),
             NFailed = col_double()
           ))
+        
+        if(nrow(csvPatchResults) == 0){
+          print(paste(paste(algorithm, program, strategy, run, "patch_result", sep = "_"), "is empty!!!", sep=" "))
+        }
 
         # Add extra info
         csvPatchResults <- csvPatchResults %>%
@@ -104,6 +111,13 @@ treatmentFunction <- function(algorithm, runs){
 # Reads everything
 metrics <- map_dfr(algorithms, treatmentFunction, 20)
 
+programs <- c(
+  "joda-time"
+)
+strategies <- c("ekstazi", "random")
+
+metrics <- bind_rows(metrics, map_dfr(algorithms, treatmentFunction, 20))
+
 # Computes RS
 addedRS <- metrics %>%
   filter(Patch != "|") %>%
@@ -114,14 +128,16 @@ addedRS <- metrics %>%
   # filter(OriginalFitnessImprovement > 0) %>%
   # Computes the relative safety of the patch. If a test case failed, then
   # RS < 1. If the patch passed with all test cases, then RS == 1.
-  mutate(RS = NPassed / NTests)
+  mutate(RS = (NPassed/10) / (NTests/10))
 
 # Save CSV file
 write_csv(addedRS, "correctness-data.csv")
 
+# print(addedRS %>%
+#         group_by(algorithm, program, strategy) %>%
+#         summarise(sum_runs = n()), n = Inf)
+
 print(addedRS %>%
   group_by(algorithm, program, strategy, run) %>%
-  summarise(mean_RS = format(RS, digits = 5),
-            Sum_NFailed = sum(NFailed),
-            Count_NFailed = length(NFailed[NFailed>0])) %>%
+  summarise(mean_RS = format(RS, digits = 5), Sum_NFailed = sum(NFailed/10)) %>%
   filter(Sum_NFailed > 0), n = Inf)

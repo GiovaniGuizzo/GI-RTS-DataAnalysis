@@ -7,22 +7,27 @@ library(hms)
 library(lubridate)
 
 # Algorithms used in the experiments
-algorithms <- c("gp")
+algorithms <- c("gp", "ls")
+
+# Programs used in the experiment
+programs <- c(
+  "commons-codec",
+  "commons-compress",
+  "commons-csv",
+  "commons-fileupload",
+  "commons-imaging",
+  "commons-text",
+  "commons-validator",
+  "gson",
+  "jcodec",
+  "jfreechart",
+  "joda-time",
+  "spatial4j"
+)
+strategies <- c("none", "ekstazi", "starts", "random")
 
 # Number of runs
 runs <- 20
-
-# Programs used in the experiment
-programs <- c("commons-codec",
-              "commons-compress",
-              "commons-csv",
-              "commons-fileupload",
-              "commons-imaging",
-              "commons-text",
-              "commons-validator")
-
-# Strategies used in the experiment
-strategies <- c("none", "ekstazi", "starts", "random")
 
 # Reads result files
 getCsvFileFunction <- function(algorithm, program, strategy, run){
@@ -99,10 +104,10 @@ getCsvPatchFileFunction <- function(algorithm, program, strategy, run){
 
 # Declare the treatment function
 # It will be executed for each program, strategy, and run
-treatmentFunction <- function(algorithm){
+treatmentFunction <- function(algorithm, upToWhichStrategy){
   map_dfr(programs, function(program){
     # Each program has multiple strategies
-    map_dfr(strategies[2:4], function(strategy){
+    map_dfr(strategies[2:upToWhichStrategy], function(strategy){
       # Each strategy is ran for 20 independent runs
       map_dfr(1:runs, function(run){
         # Now gets results from patch analyser
@@ -113,11 +118,49 @@ treatmentFunction <- function(algorithm){
   })
 }
 
-# Reads everything
-metrics <- map_dfr(algorithms, treatmentFunction)
+# Programs used in the experiment
+programs <- c(
+  "commons-codec",
+  "commons-compress",
+  "commons-csv",
+  "commons-fileupload",
+  "commons-imaging",
+  "commons-text",
+  "commons-validator",
+  "gson",
+  "jcodec",
+  "jfreechart",
+  "spatial4j"
+)
 
-metrics <- metrics %>%
-  bind_rows(metrics, none_metrics)
+# Reads everything
+metrics <- map_dfr(algorithms, treatmentFunction, 4)
+
+programs <- c(
+  "joda-time"
+)
+strategies <- c("none", "ekstazi", "random")
+
+metrics <- bind_rows(metrics, map_dfr(algorithms, treatmentFunction, 3))
+
+metrics <- bind_rows(metrics, none_metrics)
+
+# Programs used in the experiment
+programs <- c(
+  "commons-codec",
+  "commons-compress",
+  "commons-csv",
+  "commons-fileupload",
+  "commons-imaging",
+  "commons-text",
+  "commons-validator",
+  "gson",
+  "jcodec",
+  "jfreechart",
+  "joda-time",
+  "spatial4j"
+)
+strategies <- c("none", "ekstazi", "starts", "random")
 
 # Modify names of strategies
 metrics <- metrics %>%
@@ -152,7 +195,6 @@ addedRIC <- algorithms %>%
     programs %>% 
       map_dfr(function(subProgram){
         avgBest <- filter(avg_none, program == subProgram, algorithm == subAlgorithm)$avg_best
-        print(avgBest)
         metrics %>%
           filter(program == subProgram,
                  algorithm == subAlgorithm,
@@ -165,30 +207,48 @@ addedRIC <- algorithms %>%
       })
   })
 
-addedRIC %>%
-  group_by(program, strategy) %>%
-  summarise(median = format(median(RIC), digits = 3)) %>%
-  spread(strategy, median) %>%
-  xtable()
+addedRIC <- addedRIC %>%
+  mutate(algorithm = toupper(algorithm))
 
-addedRIC %>%
-  group_by(program, strategy) %>%
-  summarise(medain_RIC = format(median(RIC), digits = 3)) %>%
-  spread(strategy, medain_RIC) %>%
-  ungroup() %>%
-  summarise(Gin = median(Gin),
-            Ekstazi = median(Ekstazi),
-            STARTS = median(STARTS),
-            Random = median(Random))
+formatted_table <- addedRIC %>%
+  group_by(algorithm, program, strategy) %>%
+  summarise(median = format(median(RIC), digits = 2, nsmall = 2)) %>%
+  pivot_wider(names_from = c(strategy), values_from = median, names_sep = "+")
 
-kruskalFunction <- function(sub_program){
-  filtered_data <- addedRIC %>%
-    filter(program == sub_program)
-  
-  format(kruskal.test(RIC ~ strategy, data = filtered_data)$p.value, digits=4, nsmall = 2)
-  # print(kruskalmc(RIC ~ strategy, data = filtered_data))
-}
-mapply(kruskalFunction, programs)
+# addedRIC %>%
+#   group_by(algorithm, program, strategy) %>%
+#   summarise(median_RIC = format(median(RIC), digits = 3)) %>%
+#   pivot_wider(names_from = c(algorithm, strategy), values_from = median_RIC, names_sep = "+") %>%
+#   ungroup() %>%
+#   mutate(across(-program, as.numeric)) %>%
+#   summarise(across(-program, median, na.rm = TRUE))
+
+pvalue_table <- algorithms %>%
+  sort() %>%
+  map_dfr(function(sub_algorithm){
+    programs %>%
+    sort() %>%
+      map_dfr(function(sub_program){
+        filtered_data <- addedRIC %>%
+          filter(program == sub_program, algorithm == toupper(sub_algorithm))
+        kruskal_result = format(kruskal.test(RIC ~ strategy, data = filtered_data)$p.value, digits=4, nsmall = 2)
+        data.frame(algorithm = sub_algorithm, program = sub_program, pvalue = format(round(as.numeric(kruskal_result), 3), nsmall = 3))
+      })
+  }) %>%
+  mutate(algorithm = toupper(algorithm))
+
+formatted_table <- left_join(formatted_table, pvalue_table, by = c("program", "algorithm"))
+
+formatted_table$max<-apply(formatted_table[3:6] %>% mutate_if(is.character, as.numeric) %>% replace(is.na(.), 0), 1, max)
+
+print(formatted_table %>%
+        mutate(max = format(round(as.numeric(max), 2), nsmall = 2)) %>%
+        mutate(across(1:4, ~ifelse(. == max, paste('\\textbf{', ., '}', sep = ""), .))) %>%
+        mutate(across(1:4, ~replace(., pvalue > 0.05, paste('\\cellcolor{black!25}', .)))) %>%
+        mutate(pvalue = ifelse(pvalue == "0.000", "< 0.001", pvalue)) %>%
+        mutate(pvalue = ifelse(pvalue < 0.05, paste('\\textbf{', pvalue, '}', sep = ""), pvalue)) %>%
+        select(-max) %>%
+        xtable(),include.rownames = FALSE, booktabs = TRUE, sanitize.text.function = identity)
 
 # Compute VDA
 vdaFunction <- function(sub_program, groupA, groupB){
