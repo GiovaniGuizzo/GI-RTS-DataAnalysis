@@ -122,7 +122,7 @@ treatmentFunction <- function(algorithm, upToWhichStrategy) {
       map_dfr(1:runs, function(run) {
         # Now gets results from patch analyser
         getCsvPatchFileFunction(algorithm, program, strategy, run) %>%
-          select(-NTests,-NPassed,-NFailed)
+          select(-NTests, -NPassed, -NFailed)
       })
     })
   })
@@ -239,13 +239,21 @@ formatted_table <- addedRIC %>%
     names_sep = "+"
   )
 
-# addedRIC %>%
-#   group_by(algorithm, program, strategy) %>%
-#   summarise(median_RIC = format(median(RIC), digits = 3)) %>%
-#   pivot_wider(names_from = c(algorithm, strategy), values_from = median_RIC, names_sep = "+") %>%
-#   ungroup() %>%
-#   mutate(across(-program, as.numeric)) %>%
-#   summarise(across(-program, median, na.rm = TRUE))
+addedRIC %>%
+  group_by(algorithm, program, strategy) %>%
+  summarise(median_RIC = format(median(RIC), digits = 2, nsmall = 2)) %>%
+  pivot_wider(names_from = c(algorithm, strategy), values_from = median_RIC, names_sep = "+") %>%
+  ungroup() %>%
+  mutate(across(-program, as.numeric)) %>%
+  summarise(across(-program, median, na.rm = TRUE))
+
+addedRIC %>%
+  group_by(algorithm, program, strategy) %>%
+  summarise(median_RIC = format(median(RIC), digits = 2, nsmall = 2)) %>%
+  pivot_wider(names_from = c(strategy), values_from = median_RIC, names_sep = "+") %>%
+  ungroup() %>%
+  mutate(across(c(-program, -algorithm), as.numeric)) %>%
+  summarise(across(c(-program, -algorithm), median, na.rm = TRUE))
 
 pvalue_table <- algorithms %>%
   sort() %>%

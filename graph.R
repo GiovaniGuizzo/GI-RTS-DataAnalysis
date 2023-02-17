@@ -10,16 +10,24 @@ library(lubridate)
 algorithms <- c("gp", "ls")
 
 # Programs used in the experiment
-programs <- c("commons-codec",
-              "commons-compress",
-              "commons-csv",
-              "commons-fileupload",
-              "commons-imaging",
-              "commons-text",
-              "commons-validator")
-
-# Strategies used in the experiment
+programs <- c(
+  "commons-codec",
+  "commons-compress",
+  "commons-csv",
+  "commons-fileupload",
+  "commons-imaging",
+  "commons-text",
+  "commons-validator",
+  "gson",
+  "jcodec",
+  "jfreechart",
+  "joda-time",
+  "spatial4j"
+)
 strategies <- c("none", "ekstazi", "starts", "random")
+
+# Number of runs
+runs <- 20
 
 # Declare the treatment function
 # It will be executed for each program, strategy, and run
@@ -56,9 +64,34 @@ treatmentFunction <- function(algorithm, runs){
   })
 }
 
+# Programs used in the experiment
+programs <- c(
+  "commons-codec",
+  "commons-compress",
+  "commons-csv",
+  "commons-fileupload",
+  "commons-imaging",
+  "commons-text",
+  "commons-validator",
+  "gson",
+  "jcodec",
+  "jfreechart",
+  "spatial4j"
+)
+
 # Start loop with all programs and 20 independent runs
 metrics <- map_dfr(algorithms, treatmentFunction, 20) %>%
   mutate(total_time = profile_time + exec_time)
+
+programs <- c("joda-time")
+strategies <- c("none", "ekstazi", "random")
+
+# Start loop with all programs and 20 independent runs
+metrics_joda <- map_dfr(algorithms, treatmentFunction, 20) %>%
+  mutate(total_time = profile_time + exec_time)
+
+metrics <- bind_rows(metrics, metrics_joda)
+
 # Cleanup names
 metrics <- metrics %>%
   mutate(program = str_replace_all(program, "commons-", ""))
@@ -103,11 +136,13 @@ plotCumulative <- treatedMetrics %>%
   scale_y_continuous(breaks = seq(0,110,10)) +
   scale_fill_brewer(palette="Spectral", aesthetics = "colour")
 
-ggsave("C:/Users/giova/Projects/images/cumulative.png",
+# Save plot
+dir.create("images", showWarnings = FALSE)
+ggsave("images/cumulative.png",
        plot = plotCumulative,
        device = png(),
        width = 700,
-       height = 200,
+       height = 400,
        units = "mm",
        scale = 0.6,
        dpi = "retina")
