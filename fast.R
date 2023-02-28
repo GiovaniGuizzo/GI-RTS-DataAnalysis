@@ -5,35 +5,41 @@ library(pgirmess)
 library(effsize)
 library(hms)
 library(lubridate)
-library(scmamp)
 library(ggplot2)
-library(Rgraphviz)
 
 # Algorithms used in the experiments
-algorithms <- c("gp")
+algorithms <- c("gp", "ls")
+
+# Programs used in the experiment
+programs <- c(
+  "commons-codec",
+  "commons-compress",
+  "commons-csv",
+  "commons-fileupload",
+  "commons-imaging",
+  "commons-text",
+  "commons-validator",
+  "gson",
+  "jcodec",
+  "jfreechart",
+  "joda-time",
+  "spatial4j"
+)
+strategies <- c("none", "ekstazi", "starts")
 
 # Number of runs
 runs <- 20
 
-# Programs used in the experiment
-programs <- c("commons-codec",
-              "commons-compress",
-              "commons-csv",
-              "commons-fileupload",
-              "commons-imaging",
-              "commons-text",
-              "commons-validator")
-
-# Strategies used in the experiment
-strategies <- c("none", "ekstazi", "starts")
-
 # Reads result files
 getCsvFileFunction <- function(algorithm, program, strategy, run){
+  
   folderPath <- file.path(paste(algorithm, "results", sep = "-"), 
                           program, 
                           strategy)
-  csvResults <- folderPath %>%
-    file.path(paste(algorithm, "_result_", run, ".csv", sep = "")) %>%
+  csv_path <- folderPath %>%
+    file.path(paste(algorithm, "_result_", run, ".csv", sep = ""))
+  
+  csvResults <- csv_path %>%
     read_csv(col_types = cols(
       MethodName = col_character(),
       MethodIndex = col_integer(),
@@ -48,7 +54,6 @@ getCsvFileFunction <- function(algorithm, program, strategy, run){
   
   # Gets only the ones that passed
   csvResults %>%
-    filter(Compiled == TRUE, AllTestsPassed == TRUE) %>%
     # Add extra info
     mutate(algorithm = algorithm,
            program = program,
@@ -64,9 +69,15 @@ treatmentFunction <- function(algorithm){
     map_dfr(strategies, function(strategy){
       # Each strategy is ran for 20 independent runs
       map_dfr(1:runs, function(run){
+        folderPath <- file.path(paste(algorithm, "results", sep = "-"), 
+                                program, 
+                                strategy)
+        csv_path <- folderPath %>%
+          file.path(paste(algorithm, "_result_", run, ".csv", sep = ""))
         # Now gets results from patch analyser
-        getCsvFileFunction(algorithm, program, strategy, run) %>%
-          filter(Compiled == TRUE, AllTestsPassed == TRUE)
+        if(file.exists(csv_path)) {
+          getCsvFileFunction(algorithm, program, strategy, run)
+        }
       })
     })
   })
@@ -92,73 +103,115 @@ strategies <- c("Gin", "Ekstazi", "STARTS")
 
 # Order
 metrics$strategy <- factor(metrics$strategy, levels = strategies)
+metrics$index <- rownames(metrics)
 
-first_patch <- metrics %>%
+original_programs <- metrics %>%
   filter(Patch == "|")
 
-metrics <- metrics %>%
-  filter(Patch != "|", FitnessImprovement > 0)
+valid_patches <- metrics %>%
+  filter(Patch != "|", FitnessImprovement > 0, Compiled == TRUE, AllTestsPassed == TRUE)
 
-metrics <- algorithms %>%
+addedTimeToFind <- algorithms %>%
   map_dfr(function(subAlgorithm){
     programs %>% 
       map_dfr(function(subProgram){
         strategies %>%
           map_dfr(function(subStrategy){
             map_dfr(1:runs, function(subRun){
-              first_patch <- filter(first_patch, program == subProgram,
+              print(paste(subAlgorithm, subProgram, subStrategy, subRun, sep = " | "))
+              
+              # Finds the first patch of the list, which is the original program
+              original_program <- original_programs %>%
+                filter(program == subProgram,
                        algorithm == subAlgorithm,
                        strategy == subStrategy,
                        run == subRun)
-              first_patch_timestamp <- first_patch$TimeStamp
-              first_patch_time <- first_patch$`TotalExecutionTime(ms)`
+              # Saves the index
+              original_program_index <- original_program$index
               
-              metrics %>%
+              # Finds the first valid and improving patch of the list that is not the original patch |
+              first_valid_patch <- valid_patches %>%
                 filter(program == subProgram,
                        algorithm == subAlgorithm,
                        strategy == subStrategy,
                        run == subRun) %>%
-                slice_min(TimeStamp, n = 1) %>%
-                mutate(time_to_find = TimeStamp - (first_patch_timestamp - first_patch_time))
+                slice_min(index, n = 1)
+              
+              if(nrow(first_valid_patch) > 0){
+                # Saves the index
+                first_valid_patch_index <- first_valid_patch$index
+                # Compute the time to find as the sum of execution time of all previous patches
+                first_valid_patch$time_to_find <- (metrics %>% 
+                                                           slice(original_program_index:first_valid_patch_index) %>% 
+                                                           summarise(sum_times = sum(`TotalExecutionTime(ms)`)))$sum_times
+              }
+              first_valid_patch
             })
           })
       })
   })
 
-median_metrics <- metrics %>%
-  group_by(program, strategy, run) %>%
-  summarise(avg_time_to_find = median(time_to_find/1000))
+median_metrics <- addedTimeToFind %>%
+  group_by(algorithm, program, strategy, run) %>%
+  summarise(time_to_find = median(time_to_find/1000)) %>%
+  mutate(algorithm = toupper(algorithm))
 
 # Compute Kruskal-Wallis
-kruskalFunction <- function(sub_program){
-  filtered_data <- median_metrics %>%
-    filter(program == sub_program)
-  
-  print(sub_program)
-  print(format(kruskal.test(avg_time_to_find ~ strategy, data = filtered_data)$p.value, digits=4, nsmall = 2))
-  print(kruskalmc(avg_time_to_find ~ strategy, data = filtered_data))
-}
-mapply(kruskalFunction, programs)
+# Compute pairwise difference
+kruskal_result <- mapply(function(sub_algorithm) {
+  mapply(function(sub_program) {
+    filtered_data <- median_metrics %>%
+      filter(program == sub_program, algorithm == toupper(sub_algorithm))
+    print(sub_program)
+    print(sub_algorithm)
+    print(format(kruskal.test(time_to_find ~ strategy, data = filtered_data)$p.value, digits=4, nsmall = 2))
+    print(kruskalmc(time_to_find ~ strategy, data = filtered_data))
+  }, sort(programs))
+}, sort(algorithms))
 
-median_metrics <- metrics %>%
-  group_by(program, strategy) %>%
-  summarise(avg_time_to_find = median(time_to_find/1000))
+median_metrics <- median_metrics %>%
+  group_by(algorithm, program, strategy) %>%
+  summarise(avg_time_to_find = format(round(median(time_to_find), digits = 2), nsmall = 2))
 
-spreaded_data <- median_metrics %>%
-  spread(strategy, avg_time_to_find) %>%
-  ungroup() %>%
-  select(-program)
+formatted_table <- median_metrics %>%
+  # Spread the strategies over columns
+  pivot_wider(
+    names_from = c(strategy),
+    values_from = avg_time_to_find,
+    names_sep = "+"
+  )
 
-plotCD(spreaded_data, alpha = 0.05)
+# Find minimum value between approaches and add as column
+formatted_table$min <-
+  apply(
+    formatted_table[3:5] %>% mutate_if(is.character, as.numeric) %>% replace(is.na(.), Inf),
+    1,
+    min
+  )
+
+print(
+  formatted_table %>%
+    # Round minimum value
+    mutate(min = format(round(as.numeric(min), 2), digits = 2, nsmall = 2)) %>%
+    # Add bold to highest value
+    mutate(across(1:3, ~ ifelse(. == min, paste('\\textbf{', as.character(.), '}', sep = ""), as.character(.)))) %>%
+    # Drop min column
+    select(-min) %>%
+    # Generate latex table
+    xtable(),
+  include.rownames = FALSE,
+  booktabs = TRUE,
+  sanitize.text.function = identity
+)
 
 median_metrics %>%
-  spread(strategy, avg_time_to_find) %>%
-  xtable() %>%
-  print(include.rownames=FALSE)
+  group_by(algorithm, strategy) %>%
+  summarise(avg_time_to_find = format(round(median(as.numeric(avg_time_to_find)), digits = 2), nsmall = 2)) %>%
+  spread(strategy, avg_time_to_find)
 
 median_metrics %>%
   group_by(strategy) %>%
-  summarise(avg_time_to_find = median(avg_time_to_find)) %>%
+  summarise(avg_time_to_find = format(round(median(as.numeric(avg_time_to_find)), digits = 2), nsmall = 2)) %>%
   spread(strategy, avg_time_to_find)
 
 # Save CSV file
