@@ -7,24 +7,29 @@ library(hms)
 library(lubridate)
 
 # Algorithms used in the experiments
-algorithms <- c("ls")
+algorithms <- c("gp", "ls")
+
+# Programs used in the experiment
+programs <- c(
+  "commons-codec",
+  "commons-compress",
+  "commons-csv",
+  "commons-fileupload",
+  "commons-imaging",
+  "commons-text",
+  "commons-validator",
+  "gson",
+  "jcodec",
+  "jfreechart",
+  "joda-time",
+  "spatial4j"
+)
+strategies <- c("none", "ekstazi", "starts")
 
 # Number of runs
 runs <- 20
 
-# Programs used in the experiment
-programs <- c("commons-codec",
-              "commons-compress",
-              "commons-csv",
-              "commons-fileupload",
-              "commons-imaging",
-              "commons-text",
-              "commons-validator")
-
-# Strategies used in the experiment
-strategies <- c("none", "ekstazi", "starts")
-
-# Reads result files
+# Read result files
 getCsvFileFunction <- function(algorithm, program, strategy, run){
   folderPath <- file.path(paste(algorithm, "results", sep = "-"), 
                           program, 
@@ -43,9 +48,7 @@ getCsvFileFunction <- function(algorithm, program, strategy, run){
       TimeStamp = col_double()
     ))
   
-  # Gets only the ones that passed
   csvResults %>%
-    filter(Compiled == TRUE, AllTestsPassed == TRUE) %>%
     # Add extra info
     mutate(algorithm = algorithm,
            program = program,
@@ -53,15 +56,14 @@ getCsvFileFunction <- function(algorithm, program, strategy, run){
            run = run)
 }
 
-# Reads results for the none strategy
+# Read results for the none strategy
 none_metrics <- map_dfr(algorithms, function(algorithm){
   map_dfr(programs, function(program){
     # Each program has multiple strategies
     map_dfr(strategies[1], function(strategy){
       # Each strategy is ran for 20 independent runs
       map_dfr(1:runs, function(run){
-        getCsvFileFunction(algorithm, program, strategy, run) %>%
-          filter(FitnessImprovement > 0)
+        getCsvFileFunction(algorithm, program, strategy, run)
       })
     })
   })
@@ -106,10 +108,16 @@ treatmentFunction <- function(algorithm){
     map_dfr(strategies[2:3], function(strategy){
       # Each strategy is ran for 20 independent runs
       map_dfr(1:runs, function(run){
-        # Now gets results from patch analyser
-        getCsvPatchFileFunction(algorithm, program, strategy, run) %>%
-          filter(Compiled == TRUE, AllTestsPassed == TRUE, FitnessImprovement > 0) %>%
-          select(-NTests, -NPassed, -NFailed)
+        folderPath <- file.path(paste(algorithm, "results", sep = "-"), 
+                                program, 
+                                strategy)
+        csv_path <- folderPath %>%
+          file.path(paste(algorithm, "_result_", run, ".csv", sep = ""))
+        if(file.exists(csv_path)) {
+          # Now gets results from patch analyser
+          getCsvPatchFileFunction(algorithm, program, strategy, run) %>%
+            select(-NTests, -NPassed, -NFailed)
+        }
       })
     })
   })
@@ -118,14 +126,13 @@ treatmentFunction <- function(algorithm){
 # Reads everything
 metrics <- map_dfr(algorithms, treatmentFunction)
 
-metrics <- metrics %>%
-  bind_rows(metrics, none_metrics)
+metrics <- bind_rows(metrics, none_metrics)
 
 # Modify names of strategies
 metrics <- metrics %>%
   mutate(strategy = str_replace(strategy, "ekstazi", "Ekstazi"))
 metrics <- metrics %>%
-  mutate(strategy = str_replace(strategy, "none", "Gin"))
+  mutate(strategy = str_replace(strategy, "none", "GI"))
 metrics <- metrics %>%
   mutate(strategy = str_replace(strategy, "starts", "STARTS"))
 
@@ -135,46 +142,70 @@ metrics <- metrics %>%
 programs <- str_replace_all(programs, "commons-", "")
 
 # Order
-metrics$strategy <- factor(metrics$strategy, levels = c("Gin", "Ekstazi", "STARTS"))
+metrics$strategy <- factor(metrics$strategy, levels = c("GI", "Ekstazi", "STARTS"))
 
-metrics <- metrics %>%
-  filter(Patch != "|") %>%
+valid_patches <- metrics %>%
+  filter(Patch != "|", FitnessImprovement > 0, Compiled == TRUE, AllTestsPassed == TRUE) %>%
   distinct(Patch, .keep_all = TRUE)
 
-median_metrics <- metrics %>%
-  group_by(program, strategy, run) %>%
+median_metrics <- valid_patches %>%
+  group_by(algorithm, program, strategy, run) %>%
   summarise(count_positive_patches = n())
 
-# Compute Kruskal-Wallis
-kruskalFunction <- function(sub_program){
-  filtered_data <- median_metrics %>%
-    filter(program == sub_program)
-  
-  print(sub_program)
-  print(format(kruskal.test(count_positive_patches ~ strategy, data = filtered_data)$p.value, digits=4, nsmall = 2))
-  print(kruskalmc(count_positive_patches ~ strategy, data = filtered_data))
-}
-mapply(kruskalFunction, programs)
+# # Compute Kruskal-Wallis
+# kruskalFunction <- function(sub_program){
+#   filtered_data <- median_metrics %>%
+#     filter(program == sub_program)
+#   
+#   print(sub_program)
+#   print(format(kruskal.test(count_positive_patches ~ strategy, data = filtered_data)$p.value, digits=4, nsmall = 2))
+#   print(kruskalmc(count_positive_patches ~ strategy, data = filtered_data))
+# }
+# mapply(kruskalFunction, programs)
 
 median_metrics <- median_metrics %>%
-  group_by(program, strategy) %>%
-  summarise(median_count = median(count_positive_patches))
+  group_by(algorithm, program, strategy) %>%
+  summarise(median_count = format(round(median(count_positive_patches), digits = 1), nsmall = 1))
 
-spreaded_data <- median_metrics %>%
-  spread(strategy, median_count) %>%
-  ungroup() %>%
-  select(-program)
+formatted_table <- median_metrics %>%
+  # Spread the strategies over columns
+  pivot_wider(
+    names_from = c(strategy),
+    values_from = median_count,
+    names_sep = "+"
+  )
 
-plotCD(spreaded_data, alpha = 0.05)
+# Find minimum value between approaches and add as column
+formatted_table$max <-
+  apply(
+    formatted_table[3:5] %>% mutate_if(is.character, as.numeric) %>% replace(is.na(.), 0),
+    1,
+    max
+  )
+
+print(
+  formatted_table %>%
+    # Round maximum value
+    mutate(max = format(round(as.numeric(max), 1), digits = 1, nsmall = 1)) %>%
+    # Add bold to highest value
+    mutate(across(1:3, ~ ifelse(. == max, paste('\\textbf{', as.character(.), '}', sep = ""), as.character(.)))) %>%
+    # Drop maximum column
+    select(-max) %>%
+    # Generate latex table
+    xtable(),
+  include.rownames = FALSE,
+  booktabs = TRUE,
+  sanitize.text.function = identity
+)
 
 median_metrics %>%
-  spread(strategy, median_count) %>%
-  xtable() %>%
-  print(include.rownames=FALSE, digits = 2)
+  group_by(algorithm, strategy) %>%
+  summarise(median_count = format(round(median(as.numeric(median_count)), digits = 1), nsmall = 1)) %>%
+  spread(strategy, median_count)
 
 median_metrics %>%
   group_by(strategy) %>%
-  summarise(median_count = median(median_count)) %>%
+  summarise(median_count = format(round(median(as.numeric(median_count)), digits = 1), nsmall = 1)) %>%
   spread(strategy, median_count)
 
 # Save CSV file
