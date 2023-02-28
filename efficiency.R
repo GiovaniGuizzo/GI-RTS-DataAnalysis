@@ -423,3 +423,6 @@ ggsave("images/cumulative.png",
        scale = 0.6,
        dpi = "retina")
 
+treatedMetrics %>%
+  group_by(strategy) %>%
+  summarise(total_weeks = dhours(sum(total)), duration = as.numeric(dhours(sum(total)), "hous"))
