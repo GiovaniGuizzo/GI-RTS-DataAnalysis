@@ -342,9 +342,9 @@ plotRC <- prunedRC %>%
   ggplot(aes(x = algorithm, y = RC, fill = strategy)) +
   geom_boxplot() +
   geom_hline(yintercept = 1, color="red", linetype="dashed") +
-  labs(x = "Strategy", y = "Relative Cost (RC)")+
-  scale_y_continuous(breaks = seq(0,2.2,0.2)) +
-  coord_cartesian(ylim = ylim1*1.05) +
+  labs(x = "Algorithm", y = "Relative Cost (RC)")+
+  scale_y_continuous(breaks = seq(0,2.6,0.2)) +
+  coord_cartesian(ylim = ylim1 * 1.3) +
   theme_bw() +
   theme(panel.grid.minor=element_blank()) +
   theme(panel.grid.major.x=element_blank()) +
@@ -353,6 +353,7 @@ plotRC <- prunedRC %>%
   theme(axis.title.y = element_text(margin = margin(r = 10))) +
   theme(axis.title.x = element_text(margin = margin(t = 10))) +
   # theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  guides(fill=guide_legend(title="Strategy")) +
   facet_wrap(~program, nrow = 2)
 print(plotRC)
 

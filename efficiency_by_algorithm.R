@@ -157,15 +157,22 @@ formatted_table <- addedRC %>%
 
 print(formatted_table)
 
-# Define colors for Ekstazi and STARTS
-colors <- c("Ekstazi" = "blue", "STARTS" = "red")
-
+ylim1 = boxplot.stats(formatted_table$RC)$stats[c(1, 5)]
 # Create the boxplot
 plot_by_algorithm <- ggplot(formatted_table, aes(x = strategy, y = RC, fill = algorithm)) +
   geom_boxplot() +
+  geom_hline(yintercept = 1, color="red", linetype="dashed") +
   labs(x = "Strategy", y = "RC") +
   facet_wrap(~program, nrow = 2) +
   theme_bw() +
+  scale_y_continuous(breaks = seq(0,2.6,0.2)) +
+  coord_cartesian(ylim = ylim1 * 1.3) +
+  theme(panel.grid.minor=element_blank()) +
+  theme(panel.grid.major.x=element_blank()) +
+  theme(strip.background = element_rect(fill = "white")) +
+  theme(text = element_text(size = 18)) +
+  theme(axis.title.y = element_text(margin = margin(r = 10))) +
+  theme(axis.title.x = element_text(margin = margin(t = 10))) +
   guides(fill=guide_legend(title="Algorithm"))
 
 # Save plot
